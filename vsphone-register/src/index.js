@@ -95,7 +95,7 @@ async function main() {
 
   const count = Number(args.count || cfg.count || 1);
   const headless = args.headless ? true : args.headed ? false : !!cfg.headless;
-  const delayMs = Number(args.delay ?? cfg.delayMs ?? 25000);
+  const delayMs = Number(args.delay ?? cfg.delayMs ?? 15000);
   const delayJitter = Number(args.jitter ?? cfg.delayJitterMs ?? 10000);
   const password = args.password || null;
   const outDir = path.resolve(ROOT, args.out || cfg.output?.dir || 'output');

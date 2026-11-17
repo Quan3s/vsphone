@@ -2,7 +2,7 @@
 
 /**
  * Chay rieng producer 1 luong (khong can API server):
- *   node src/producer-cli.js --delay 25000
+ *   node src/producer-cli.js --delay 15000
  * Tai khoan duoc luu vao PostgreSQL de server /register lay dan.
  */
 
@@ -51,7 +51,7 @@ async function main() {
       ...(cfg.mailbox || {}),
       provider: 'inboxkitten',
     },
-    delayMs: Number(args.delay ?? producerCfg.delayMs ?? cfg.delayMs ?? 25000),
+    delayMs: Number(args.delay ?? producerCfg.delayMs ?? cfg.delayMs ?? 15000),
     jitterMs: Number(args.jitter ?? producerCfg.jitterMs ?? cfg.delayJitterMs ?? 0),
     passwordLength: cfg.passwordLength || 12,
     log: console.log,

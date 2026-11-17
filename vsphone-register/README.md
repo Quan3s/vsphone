@@ -7,7 +7,7 @@ Tool tự động đăng ký tài khoản trên **cloud.vsphone.com** (VSPhone �
 Khác với chế độ cũ (mỗi request API tự đăng ký một account), chế độ Pool tách làm 2 phần:
 
 1. **Producer đơn luồng** (chạy ngay khi khởi động `server.js`, hoặc chạy riêng bằng `npm run start:producer`):
-   dùng **inboxkitten**, tạo account → lưu PostgreSQL → nghỉ **25s** → tạo tiếp, lặp vô hạn.
+   dùng **inboxkitten**, tạo account → lưu PostgreSQL → nghỉ **15s** → tạo tiếp, lặp vô hạn.
 2. **API** chỉ lấy account có trong pool:
    - chỉ lấy account **đã tạo xong ≥ 10 phút** và **chưa quá 60 phút**;
    - trả về chuỗi `email|password`;
@@ -23,7 +23,7 @@ npm run start:server
 
 # tuỳ chọn: bật riêng producer trong tiến trình khác, tắt producer trong server
 node src/server.js --no-producer
-npm run start:producer -- --delay 25000
+npm run start:producer -- --delay 15000
 
 # lấy account (cần apiKey trong config.server.apiKeys hoặc API_KEYS env)
 curl -H "x-api-key: changeme-key-1" http://localhost:3000/register
@@ -49,11 +49,11 @@ node src/server.js --multi-login --login-workers 4 --login-window 180000
 | Flag server | Mặc định | Ý nghĩa |
 |---|---|---|
 | `--no-producer` | – | tắt producer trong server (dùng khi chạy producer riêng) |
-| `--producer-delay ms` | `25000` | nghỉ giữa 2 lần tạo account |
+| `--producer-delay ms` | `15000` | nghỉ giữa 2 lần tạo account |
 | `--producer-jitter ms` | `0` | ngẫu nhiên cộng thêm vào delay |
 | `--provider P` | `inboxkitten` | provider lấy mail (mặc định inboxkitten) |
-| `--pool-min N` | `10` | tuổi tối thiểu (phút) để API lấy account |
-| `--pool-max N` | `60` | tuổi tối đa (phút); account cũ hơn bị xoá |
+| `--pool-min N` | `5` | tuổi tối thiểu (giây) để API lấy account |
+| `--pool-max N` | `1800` | tuổi tối đa (giây = 30 phút); account cũ hơn bị xoá |
 | `--multi-login` | off | bật luồng browser headless login/logout/login |
 | `--login-workers N` | `2` | số browser worker |
 | `--login-window ms` | `180000` | hạn xử lý (3 phút), quá hạn thì bỏ qua |
@@ -122,7 +122,7 @@ Trong lúc chạy, cửa sổ Chromium sẽ mở ra và tự động:
 |---|---|---|
 | `--count N` | `5` | số tài khoản cần tạo |
 | `--parallel N` | `1` | mở N cửa sổ song song (mỗi cửa sổ có solver riêng, chạy độc lập) |
-| `--delay ms` | `25000` | nghỉ giữa 2 tài khoản |
+| `--delay ms` | `15000` | nghỉ giữa 2 tài khoản |
 | `--jitter ms` | `10000` | ngẫu nhiên cộng thêm vào delay |
 | `--headless` | off | chạy ẩn (chỉ dùng cho `--dry-run`; captcha nên chạy headed để dễ debug) |
 | `--password P` | random 12 ký tự | mật khẩu dùng chung cho mọi tài khoản |

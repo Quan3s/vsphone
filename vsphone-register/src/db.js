@@ -4,8 +4,12 @@
  * Pool tai khoan VSPhone tren PostgreSQL.
  *
  * - Producer luu tai khoan vao day sau khi tao xong (created_at = luc luu).
- * - API lay 1 tai khoan co tuoi [minAgeMinutes, maxAgeMinutes] va XOA NO LUON.
- * - Tai khoan qua han (> maxAgeMinutes) bi xoá dinh ky / moi lan goi API.
+ * - API lay 1 tai khoan co tuoi [minAgeSeconds, maxAgeSeconds] va XOA NO LUON.
+ * - Tai khoan qua han (> maxAgeSeconds) bi xoá dinh ky / moi lan goi API.
+ *
+ * THoi GIAN: moi quy dinh tuoi/xoa deu dung NOW() CUA POSTGRES trong SQL,
+ * KHONG dung Date.now() cua may local (tranh lech dong ho / timezone).
+ * created_at mac dinh cung la NOW() cua DB.
  */
 
 function loadPg() {
@@ -112,31 +116,32 @@ class AccountDB {
     return true;
   }
 
-  /** Xoá cac tai khoan duoc tao qua lu (>= maxAgeMinutes p). */
-  async cleanupStale(maxAgeMinutes = 60) {
+  /** Xoá cac tai khoan duoc tao qua lu (>= maxAgeSeconds giay) — dung NOW() cua DB. */
+  async cleanupStale(maxAgeSeconds = 1800) {
     if (!this.pool) return 0;
     const { rowCount } = await this.pool.query(
-      `DELETE FROM ${this.qTable} WHERE created_at < NOW() - (($1::int) || ' minutes')::interval`,
-      [maxAgeMinutes],
+      `DELETE FROM ${this.qTable} WHERE created_at < NOW() - (($1::int) || ' seconds')::interval`,
+      [maxAgeSeconds],
     );
-    if (rowCount > 0) this.log(`[db] da xoá ${rowCount} tai khoan qua lu (>${maxAgeMinutes}p)`);
+    if (rowCount > 0) this.log(`[db] da xoá ${rowCount} tai khoan qua lu (>${maxAgeSeconds}s)`);
     return rowCount;
   }
 
   /**
-   * Lay 1 tai khoan da tao >= minAgeMinutes va chua qua maxAgeMinutes,
+   * Lay 1 tai khoan da tao >= minAgeSeconds va chua qua maxAgeSeconds,
    * ROI XOA NGAY KHOI DB (ngan 2 API call lay cung 1 account).
+   * Moc thoi gian hoan toan lay tu NOW() cua DB, khong dung local time.
    * Tra ve null neu pool chua co account nao đu dieu kien.
    */
-  async takeOne({ minAgeMinutes = 10, maxAgeMinutes = 60 } = {}) {
+  async takeOne({ minAgeSeconds = 5, maxAgeSeconds = 1800 } = {}) {
     if (!this.pool) return null;
-    await this.cleanupStale(maxAgeMinutes);
+    await this.cleanupStale(maxAgeSeconds);
     const q = `
       WITH picked AS (
         SELECT id, email, password, token, user_id, created_at
         FROM ${this.qTable}
-        WHERE created_at <= NOW() - (($1::int) || ' minutes')::interval
-          AND created_at >= NOW() - (($2::int) || ' minutes')::interval
+        WHERE created_at <= NOW() - (($1::int) || ' seconds')::interval
+          AND created_at >= NOW() - (($2::int) || ' seconds')::interval
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -146,7 +151,7 @@ class AccountDB {
       WHERE t.id = p.id
       RETURNING p.email AS email, p.password AS password, p.token AS token,
                 p.user_id AS user_id, p.created_at AS created_at`;
-    const { rows } = await this.pool.query(q, [minAgeMinutes, maxAgeMinutes]);
+    const { rows } = await this.pool.query(q, [minAgeSeconds, maxAgeSeconds]);
     if (!rows.length) return null;
     const row = rows[0];
     this.log(`[db] da lay va xoa ${row.email} khoi pool (createdAt=${row.created_at})`);
@@ -159,24 +164,24 @@ class AccountDB {
     };
   }
 
-  /** Thong ke pool: tong so, so san sang, so qua lu, so con qua moi. */
-  async stats({ minAgeMinutes = 10, maxAgeMinutes = 60 } = {}) {
+  /** Thong ke pool: tong so, so san sang, so qua lu, so con qua moi (NOW() cua DB). */
+  async stats({ minAgeSeconds = 5, maxAgeSeconds = 1800 } = {}) {
     if (!this.pool) return { total: 0, ready: 0, fresh: 0, stale: 0 };
     const { rows } = await this.pool.query(
       `SELECT
          COUNT(*)::int AS total,
          COUNT(*) FILTER (
-           WHERE created_at <= NOW() - (($1::int) || ' minutes')::interval
-             AND created_at >= NOW() - (($2::int) || ' minutes')::interval
+           WHERE created_at <= NOW() - (($1::int) || ' seconds')::interval
+             AND created_at >= NOW() - (($2::int) || ' seconds')::interval
          )::int AS ready,
          COUNT(*) FILTER (
-           WHERE created_at > NOW() - (($1::int) || ' minutes')::interval
+           WHERE created_at > NOW() - (($1::int) || ' seconds')::interval
          )::int AS fresh,
          COUNT(*) FILTER (
-           WHERE created_at < NOW() - (($2::int) || ' minutes')::interval
+           WHERE created_at < NOW() - (($2::int) || ' seconds')::interval
          )::int AS stale
        FROM ${this.qTable}`,
-      [minAgeMinutes, maxAgeMinutes],
+      [minAgeSeconds, maxAgeSeconds],
     );
     const r = rows[0] || {};
     return {

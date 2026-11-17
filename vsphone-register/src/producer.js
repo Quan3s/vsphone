@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Producer DON LUONG: tao tai khoan -> luu PostgreSQL -> nghi 25s -> tao tiep.
+ * Producer DON LUONG: tao tai khoan -> luu PostgreSQL -> nghi 15s -> tao tiep.
  * Mac dinh dung inboxkitten de lay ma xac thuc.
  */
 
@@ -13,7 +13,7 @@ class AccountProducer {
     registrar,
     db,
     mailboxCfg = {},
-    delayMs = 25000,
+    delayMs = 15000,
     jitterMs = 0,
     passwordLength = 12,
     log = console.log,

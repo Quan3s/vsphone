@@ -4,15 +4,16 @@
  * vsphone-register — Pool API server
  *
  * 1) Producer DON LUONG (bat dau cung server):
- *    tao tai khoan bang inboxkitten -> luu PostgreSQL -> nghi 25s -> lap lai.
+ *    tao tai khoan bang inboxkitten -> luu PostgreSQL -> nghi 15s -> lap lai.
  *
  * 2) API:
  *    GET/POST /register  (hoac /account, /pool/account)
  *      Header: x-api-key: <key>   hoac   ?apikey=<key>
  *      ?format=raw  -> tra thang chuoi "email|password"
  *
- *    Lay 1 tai khoan DA TAO >= 10p va chua qua 60p, tra ve dang `email|password`,
- *    XOA NGAY account do khoi DB. Account tao > 60p tu dong bi xoa.
+ *    Lay 1 tai khoan DA TAO >= 5s va chua qua 30p, tra ve dang `email|password`,
+ *    XOA NGAY account do khoi DB. Account tao > 30p tu dong bi xoa.
+ *    Moc thoi gian lay tu NOW() cua PostgreSQL (khong dung dong ho local).
  *
  *    GET /health -> trang thai producer + so luong pool.
  *
@@ -79,9 +80,10 @@ async function main() {
     console.error('[server] CANH BAO: chua co apiKey — moi request deu bi tu choi');
   }
 
-  // ---- pool: tuoi toi thieu / toi da (phut) ----
-  const minAge = Math.max(0, Number(args['pool-min'] ?? serverCfg.pool?.minAgeMinutes ?? 10));
-  const maxAge = Math.max(minAge, Number(args['pool-max'] ?? serverCfg.pool?.maxAgeMinutes ?? 60));
+  // ---- pool: tuoi toi thieu / toi da (GIAY) ----
+  // Mac dinh: san sang sau 5s, tu dong xoa sau 30p (1800s).
+  const minAge = Math.max(0, Number(args['pool-min'] ?? serverCfg.pool?.minAgeSeconds ?? 5));
+  const maxAge = Math.max(minAge, Number(args['pool-max'] ?? serverCfg.pool?.maxAgeSeconds ?? 1800));
 
   // ---- producer (1 luong) ----
   const producerEnabled =
@@ -90,7 +92,7 @@ async function main() {
       : args.producer !== undefined
         ? !isFalse(args.producer)
         : (serverCfg.producer?.enabled ?? true);
-  const producerDelay = Number(args['producer-delay'] ?? serverCfg.producer?.delayMs ?? cfg.delayMs ?? 25000);
+  const producerDelay = Number(args['producer-delay'] ?? serverCfg.producer?.delayMs ?? cfg.delayMs ?? 15000);
   const producerJitter = Number(args['producer-jitter'] ?? serverCfg.producer?.jitterMs ?? 0);
   const mailboxProvider = args.provider || serverCfg.producer?.mailbox?.provider || 'inboxkitten';
 
@@ -189,7 +191,7 @@ async function main() {
             ? { running: producer.running, created: producer.created, failed: producer.failed }
             : 'off',
           warmup: { enabled: multiLogin, queued: warmupQueue.length },
-          pool: await db.stats({ minAgeMinutes: minAge, maxAgeMinutes: maxAge }),
+          pool: await db.stats({ minAgeSeconds: minAge, maxAgeSeconds: maxAge }),
         });
       }
 
@@ -202,12 +204,12 @@ async function main() {
         return send(res, 401, { ok: false, error: 'invalid api key' });
       }
 
-      const account = await db.takeOne({ minAgeMinutes: minAge, maxAgeMinutes: maxAge });
+      const account = await db.takeOne({ minAgeSeconds: minAge, maxAgeSeconds: maxAge });
       if (!account) {
         return send(res, 503, {
           ok: false,
-          error: `chua co tai khoan tuoi ${minAge}-${maxAge}p trong pool`,
-          pool: await db.stats({ minAgeMinutes: minAge, maxAgeMinutes: maxAge }),
+          error: `chua co tai khoan tuoi ${minAge}s-${maxAge}s trong pool`,
+          pool: await db.stats({ minAgeSeconds: minAge, maxAgeSeconds: maxAge }),
         });
       }
 
@@ -234,7 +236,7 @@ async function main() {
   server.listen(port, () => {
     console.log(`[server] lang nghe port ${port}`);
     console.log(`[server] GET/POST /register | ?apikey=<key> | x-api-key header | ?format=raw`);
-    console.log(`[server] pool: lay account tuoi ${minAge}-${maxAge}p, xoa >${maxAge}p, xoa ngay sau khi lay`);
+    console.log(`[server] pool: lay account tuoi ${minAge}s-${maxAge}s, xoa >${maxAge}s, xoa ngay sau khi lay (moc thoi gian tu DB NOW())`);
     console.log(`[server] producer: ${producerEnabled ? `bat (inboxkitten, nghi ${producerDelay}ms)` : 'tat (--no-producer)'}`);
     console.log(`[server] multi-login: ${multiLogin ? `bat (${loginWorkers} worker, han ${loginWindowMs}ms)` : 'tat (them --multi-login de bat)'}`);
   });

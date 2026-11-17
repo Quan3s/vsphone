@@ -2,7 +2,7 @@
   "loginUrl": "https://cloud.vsphone.com/login",
   "count": 5,
   "parallel": 1,
-  "delayMs": 25000,
+  "delayMs": 15000,
   "delayJitterMs": 10000,
   "headless": false,
   "slowMo": 0,
@@ -43,12 +43,12 @@
       "changeme-key-1"
     ],
     "pool": {
-      "minAgeMinutes": 10,
-      "maxAgeMinutes": 60
+      "minAgeSeconds": 5,
+      "maxAgeSeconds": 1800
     },
     "producer": {
       "enabled": true,
-      "delayMs": 25000,
+      "delayMs": 15000,
       "jitterMs": 0,
       "mailbox": {
         "provider": "inboxkitten"
