@@ -36,7 +36,9 @@ class AccountDB {
     this.pool = new Pool({
       connectionString: this.connectionString,
       max: 5,
-      idleTimeoutMillis: 30000,
+      // Neon/pgBouncer co the dong connection idle som; xoay vong nhanh hon de tranh
+      // loi "Connection terminated due to connection timeout".
+      idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 15000,
     });
     await this.pool.query(`SELECT 1`);
@@ -57,6 +59,31 @@ class AccountDB {
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`;
     await this.pool.query(sql);
+
+    // Bang da co tu cac version truoc co the thieu cot -> auto migration.
+    const { rows } = await this.pool.query(
+      'SELECT column_name FROM information_schema.columns WHERE table_name = $1',
+      [this.table],
+    );
+    const cols = new Set(rows.map((r) => r.column_name));
+    if (!cols.has('token')) {
+      await this.pool.query(`ALTER TABLE ${this.qTable} ADD COLUMN token TEXT`);
+      // Doc cac ten cot cu neu co de khong mat token.
+      const legacy = ['vstoken', 'api_token'].filter((c) => cols.has(c));
+      if (legacy.length) {
+        await this.pool.query(
+          `UPDATE ${this.qTable} SET token = COALESCE(${legacy.map((c) => `"${c}"`).join(', ')}) WHERE token IS NULL`,
+        );
+      }
+      this.log(`[db] da them cot token vao bang "${this.table}"`);
+    }
+    if (!cols.has('updated_at')) {
+      await this.pool.query(
+        `ALTER TABLE ${this.qTable} ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+      );
+      this.log(`[db] da them cot updated_at vao bang "${this.table}"`);
+    }
+
     const idx = `"${String(this.table).replace(/"/g, '""')}_created_at_idx"`;
     await this.pool.query(`CREATE INDEX IF NOT EXISTS ${idx} ON ${this.qTable} (created_at)`);
   }
