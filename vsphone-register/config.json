@@ -55,7 +55,7 @@
       }
     },
     "multiLogin": {
-      "enabled": false,
+      "enabled": true,
       "workers": 2,
       "windowMs": 180000
     }
