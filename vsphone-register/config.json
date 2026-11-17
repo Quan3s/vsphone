@@ -29,7 +29,7 @@
   "database": {
     "enabled": false,
     "connectionString": "",
-    "table": "vsphone_accounts"
+    "table": "vsphone_pool"
   },
   "output": {
     "dir": "output",
