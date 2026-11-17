@@ -11,7 +11,8 @@
     "probe": "node src/index.js --count 1 --dry-run",
     "test": "node test/pickcode.test.js && node test/solver.test.js",
     "start:server": "node src/server.js",
-    "start:server:dev": "PORT=3000 node src/server.js"
+    "start:server:dev": "PORT=3000 node src/server.js",
+    "start:producer": "node src/producer-cli.js"
   },
   "dependencies": {
     "pg": "^8.23.1",

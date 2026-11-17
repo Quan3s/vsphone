@@ -2,6 +2,65 @@
 
 Tool tự động đăng ký tài khoản trên **cloud.vsphone.com** (VSPhone – cloud phone Android).
 
+## Chế độ Pool (khuyến dùng) — server trả account `email|password`
+
+Khác với chế độ cũ (mỗi request API tự đăng ký một account), chế độ Pool tách làm 2 phần:
+
+1. **Producer đơn luồng** (chạy ngay khi khởi động `server.js`, hoặc chạy riêng bằng `npm run start:producer`):
+   dùng **inboxkitten**, tạo account → lưu PostgreSQL → nghỉ **25s** → tạo tiếp, lặp vô hạn.
+2. **API** chỉ lấy account có trong pool:
+   - chỉ lấy account **đã tạo xong ≥ 10 phút** và **chưa quá 60 phút**;
+   - trả về chuỗi `email|password`;
+   - **xoá ngay account đó khỏi DB** (tránh 2 request lấy trùng);
+   - account **> 60 phút** tự động bị xoá (mỗi lần gọi API + mỗi phút).
+
+```bash
+# cần PostgreSQL: đặt DATABASE_URL hoặc config.database.connectionString
+export DATABASE_URL="postgres://user:pass@127.0.0.1:5432/vsphone"
+
+# chạy server: producer tự đứng sau, API sẵn sàng
+npm run start:server
+
+# tuỳ chọn: bật riêng producer trong tiến trình khác, tắt producer trong server
+node src/server.js --no-producer
+npm run start:producer -- --delay 25000
+
+# lấy account (cần apiKey trong config.server.apiKeys hoặc API_KEYS env)
+curl -H "x-api-key: changeme-key-1" http://localhost:3000/register
+# => {"ok":true,"account":"abc123@inboxkitten.com|Pass@123", ...}
+
+# trả thẳng chuỗi email|password
+curl -H "x-api-key: changeme-key-1" "http://localhost:3000/register?format=raw"
+
+# xem trạng thái producer / pool
+curl http://localhost:3000/health
+```
+
+### Multi-login (flag, mặc định tắt)
+
+Khi bật `--multi-login`, mỗi account vừa được API lấy ra sẽ được xếp vào hàng đợi.
+Các browser **headless cực nhẹ** (viewport 640×480, chặn image/font/media, 2 worker mặc định)
+sẽ **login → logout → login lại** trong vòng **3 phút** để sinh multi-progress:
+
+```bash
+node src/server.js --multi-login --login-workers 4 --login-window 180000
+```
+
+| Flag server | Mặc định | Ý nghĩa |
+|---|---|---|
+| `--no-producer` | – | tắt producer trong server (dùng khi chạy producer riêng) |
+| `--producer-delay ms` | `25000` | nghỉ giữa 2 lần tạo account |
+| `--producer-jitter ms` | `0` | ngẫu nhiên cộng thêm vào delay |
+| `--provider P` | `inboxkitten` | provider lấy mail (mặc định inboxkitten) |
+| `--pool-min N` | `10` | tuổi tối thiểu (phút) để API lấy account |
+| `--pool-max N` | `60` | tuổi tối đa (phút); account cũ hơn bị xoá |
+| `--multi-login` | off | bật luồng browser headless login/logout/login |
+| `--login-workers N` | `2` | số browser worker |
+| `--login-window ms` | `180000` | hạn xử lý (3 phút), quá hạn thì bỏ qua |
+| `--db-url URL` | `DATABASE_URL` | connection string PostgreSQL |
+| `--db-table T` | `vsphone_accounts` | tên bảng pool |
+| `--port N` | `3000` | port lắng nghe |
+
 ## Flow tool thực hiện (đúng theo API thật của VSPhone)
 
 | Bước | Việc | API |

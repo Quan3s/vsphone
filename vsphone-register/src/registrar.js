@@ -95,6 +95,123 @@ class VSPhoneRegistrar {
     return session;
   }
 
+  /**
+   * Session "nhe" dung cho warmup multi-login: headless, viewport nho,
+   * chan tai image/font/media, khong can captcha solver.
+   */
+  async newLightSession(log = console.log) {
+    if (!this.browser) {
+      this.browser = await chromium.launch({
+        headless: true,
+        args: ['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage'],
+      });
+    }
+    const context = await this.browser.newContext({
+      viewport: { width: 640, height: 480 },
+      locale: 'en-US',
+      timezoneId: 'Asia/Ho_Chi_Minh',
+      serviceWorkers: 'block',
+    });
+    await context.route(/\.(png|jpe?g|gif|webp|avif|svg|woff2?|ttf|otf|mp4|mp3)(\?|$)/i, (route) =>
+      route.abort(),
+    );
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    const page = await context.newPage();
+    const session = Object.create(VSPhoneRegistrar.prototype);
+    session.cfg = { ...this.cfg, headless: true, debug: false };
+    session.log = log;
+    session.browser = this.browser;
+    session.context = context;
+    session.page = page;
+    session.imageBuffers = null;
+    return session;
+  }
+
+  /** Dong rieng context cua 1 session (khong dong cua browser chinh). */
+  async closeContext() {
+    try {
+      if (this.context) await this.context.close();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Dang nhap bang email/mat khau co san (khong can ma xac thuc).
+   * Flow that cua VSPhone: CHECK_EMAIL -> (email ton tai) LOGIN -> submit /api/user/login.
+   */
+  async loginExisting({ email, password }, { timeoutMs = 120000 } = {}) {
+    const page = this.page;
+    await page.goto(this.cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.evaluate(() => {
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch (_) {
+        /* ignore */
+      }
+    });
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForSelector(SEL.email, { timeout: 30000 });
+    await this.typeInto(SEL.email, email, 20);
+    await this.ensureTosChecked();
+
+    // Buoc 1: submit email -> checkEmail. Email da ton tai => form chuyen sang LOGIN.
+    const checkPromise = this.waitForApi(API.checkEmail, 30000).catch(() => null);
+    await page.click(SEL.submit);
+    const check = await checkPromise;
+    if (check && check.code === 200 && check.data === true) {
+      throw new Error('email chua ton tai tren VSPhone - khong the login');
+    }
+
+    // Buoc 2: dien mat khau ( xuat hien sau khi checkEmail xac nhan email ton tai ).
+    await page.waitForSelector(SEL.password, { state: 'visible', timeout: 30000 });
+    await this.typeInto(SEL.password, password, 20);
+    await this.ensureTosChecked();
+
+    // Buoc 3: submit -> /api/user/login (site tu md5 mat khau, loginType=0).
+    const loginPromise = this.waitForApi(API.login, timeoutMs).catch(() => null);
+    await page.click(SEL.submit);
+    const res = await loginPromise;
+
+    let token = null;
+    let userId = null;
+    const deadline = Date.now() + Math.min(timeoutMs, 120000);
+    while (Date.now() < deadline) {
+      token = await page.evaluate(() => localStorage.getItem('token')).catch(() => null);
+      userId = await page.evaluate(() => localStorage.getItem('userId')).catch(() => null);
+      if (token) break;
+      const pageError = await this.readPageError();
+      if (pageError) throw new Error(`login that bai: ${pageError}`);
+      await sleep(1000);
+    }
+    if (!token) throw new Error('login that bai: khong thay token trong localStorage');
+    return { token, userId: userId ? String(userId) : null, apiCode: res ? res.code : null };
+  }
+
+  /** Logout phia client: xoa token/session roi quay ve trang login. */
+  async logout() {
+    const page = this.page;
+    await page
+      .evaluate(() => {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch (_) {
+          /* ignore */
+        }
+      })
+      .catch(() => {});
+    try {
+      await page.context().clearCookies();
+    } catch (_) {
+      /* ignore */
+    }
+    await page.goto(this.cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+  }
+
   /** Cho doi mot response API khop pattern (tra ve {code,msg,data}). */
   waitForApi(path, timeoutMs) {
     return new Promise((resolve, reject) => {

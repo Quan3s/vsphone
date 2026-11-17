@@ -41,6 +41,23 @@
     "port": 3000,
     "apiKeys": [
       "changeme-key-1"
-    ]
+    ],
+    "pool": {
+      "minAgeMinutes": 10,
+      "maxAgeMinutes": 60
+    },
+    "producer": {
+      "enabled": true,
+      "delayMs": 25000,
+      "jitterMs": 0,
+      "mailbox": {
+        "provider": "inboxkitten"
+      }
+    },
+    "multiLogin": {
+      "enabled": false,
+      "workers": 2,
+      "windowMs": 180000
+    }
   }
 }
