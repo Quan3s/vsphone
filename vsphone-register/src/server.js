@@ -71,13 +71,17 @@ async function main() {
   const serverCfg = cfg.server || {};
 
   const port = Number(args.port ?? serverCfg.port ?? process.env.PORT ?? 3000);
+  // API key: uu tien bien moi truong (Railway) — API_KEY hoac API_KEYS (cach bang phay).
+  // Khi co env key thi BO QUA key hardcode trong config.json (tranh key mac dinh chay tren production).
+  const envKeysRaw = process.env.API_KEY || process.env.API_KEYS || '';
+  const envKeys = envKeysRaw.split(',').map((k) => k.trim()).filter(Boolean);
   const apiKeys = new Set(
-    (serverCfg.apiKeys || [])
-      .concat(process.env.API_KEYS ? process.env.API_KEYS.split(',').map((k) => k.trim()) : [])
-      .filter(Boolean),
+    envKeys.length > 0 ? envKeys : (serverCfg.apiKeys || []).filter(Boolean),
   );
   if (apiKeys.size === 0) {
-    console.error('[server] CANH BAO: chua co apiKey — moi request deu bi tu choi');
+    console.error('[server] CANH BAO: chua co apiKey — moi request deu bi tu choi (dat API_KEY trong Railway)');
+  } else {
+    console.log(`[server] apiKey: ${apiKeys.size} key (${envKeys.length ? 'tu env' : 'tu config'})`);
   }
 
   // ---- pool: tuoi toi thieu / toi da (GIAY) ----
@@ -100,7 +104,8 @@ async function main() {
   const multiLogin = args['multi-login'] !== undefined
     ? !isFalse(args['multi-login'])
     : !!(serverCfg.multiLogin?.enabled ?? false);
-  const loginWorkers = Math.max(1, Number(args['login-workers'] ?? serverCfg.multiLogin?.workers ?? 2));
+  // Luon 1 worker — khong cho phep nhieu luong login (bo flag --login-workers).
+  const loginWorkers = 1;
   const loginWindowMs = Number(args['login-window'] ?? serverCfg.multiLogin?.windowMs ?? 180000);
   let shuttingDown = false;
 

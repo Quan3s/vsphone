@@ -1,0 +1,8 @@
+**/node_modules
+**/output
+**/*.log
+**/.env
+.git
+README.md
+mod
+A.txt
