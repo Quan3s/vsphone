@@ -218,6 +218,8 @@ async function main() {
           browser: {
             healthy: typeof registrar.isHealthy === 'function' ? registrar.isHealthy() : null,
             relaunches: registrar.relaunchCount || 0,
+            recycles: registrar.recycleCount || 0,
+            rssMb: Math.round(process.memoryUsage().rss / 1048576),
           },
           pool: {
             ...(await db.stats(poolPolicy)),
