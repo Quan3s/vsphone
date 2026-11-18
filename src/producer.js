@@ -75,6 +75,16 @@ class AccountProducer {
       this.lastErrorAt = new Date().toISOString();
       this.log(`[producer] #${index + 1} that bai (${email}): ${err.message}`);
       return null;
+    } finally {
+      // OOM defense: dong context/page cu, mo context moi sau MOI account.
+      // Browser duoc giu lai nen warmup worker khong bi anh huong.
+      if (this.registrar && typeof this.registrar.recyclePage === 'function') {
+        try {
+          await this.registrar.recyclePage();
+        } catch (err) {
+          this.log(`[producer] khong recycle duoc page: ${err.message}`);
+        }
+      }
     }
   }
 

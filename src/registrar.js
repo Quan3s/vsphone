@@ -40,14 +40,11 @@ class VSPhoneRegistrar {
     this.context = null;
     this.page = null;
     this.relaunchCount = 0;
+    this.recycleCount = 0;
   }
 
-  async launch() {
-    this.browser = await chromium.launch({
-      headless: !!this.cfg.headless,
-      slowMo: this.cfg.slowMo || 0,
-      args: ['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage'],
-    });
+  /** Tao context/page chinh (dung lai khi can "lam sach" memory sau moi account). */
+  async _newMainContext() {
     this.context = await this.browser.newContext({
       viewport: { width: 1280, height: 900 },
       locale: 'en-US',
@@ -59,6 +56,38 @@ class VSPhoneRegistrar {
     this.page = await this.context.newPage();
     this.imageBuffers = { back: null, shadow: null, backAt: 0, shadowAt: 0 };
     attachImageCollector(this.page, this.imageBuffers, !!this.cfg.debug, this.log);
+    return this.page;
+  }
+
+  async launch() {
+    this.browser = await chromium.launch({
+      headless: !!this.cfg.headless,
+      slowMo: this.cfg.slowMo || 0,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',   // tranh crash do /dev/shm nho trong Docker
+        '--disable-gpu',
+        '--disable-extensions',
+        '--disable-background-networking',
+      ],
+    });
+    return this._newMainContext();
+  }
+
+  /**
+   * Dong context/page chinh va mo lai context moi (KHONG dong browser).
+   * Giai phong bo nho tich luy sau moi lan dang ky -> tranh OOM sau hang chuc account.
+   */
+  async recyclePage() {
+    if (!this.isHealthy()) return this.ensureAlive(this.log);
+    const old = this.context;
+    this.context = null;
+    this.page = null;
+    if (old) {
+      try { await old.close(); } catch (_) { /* ignore */ }
+    }
+    await this._newMainContext();
+    this.recycleCount = (this.recycleCount || 0) + 1;
     return this.page;
   }
 
