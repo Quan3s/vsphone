@@ -1,3 +1,7 @@
-# Chi push noi dung trong vsphone-register/ len remote.
+# Chi push noi dung app len remote; mod/ va A.txt la rac local.
 mod/
 A.txt
+node_modules/
+output/
+*.log
+.env
