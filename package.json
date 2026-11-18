@@ -9,7 +9,7 @@
     "start": "node src/index.js",
     "start:1": "node src/index.js --count 1",
     "probe": "node src/index.js --count 1 --dry-run",
-    "test": "node test/pickcode.test.js && node test/solver.test.js",
+    "test": "node test/pickcode.test.js && node test/solver.test.js && node test/self-heal.test.js && node test/pool-policy.test.js",
     "start:server": "node src/server.js",
     "start:server:dev": "PORT=3000 node src/server.js",
     "start:producer": "node src/producer-cli.js"

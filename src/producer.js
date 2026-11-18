@@ -16,6 +16,7 @@ class AccountProducer {
     delayMs = 15000,
     jitterMs = 0,
     passwordLength = 12,
+    maxAccounts = 50,
     log = console.log,
   } = {}) {
     this.registrar = registrar;
@@ -27,10 +28,16 @@ class AccountProducer {
     this.delayMs = Math.max(0, Number(delayMs) || 0);
     this.jitterMs = Math.max(0, Number(jitterMs) || 0);
     this.passwordLength = passwordLength;
+    this.maxAccounts = Math.max(1, Number(maxAccounts) || 50);
     this.log = log;
     this.running = false;
     this.created = 0;
     this.failed = 0;
+    this.skipped = 0;
+    this.lastSkipAt = null;
+    this.lastSuccessAt = null;
+    this.lastError = null;
+    this.lastErrorAt = null;
     this.onAccount = null;
   }
 
@@ -39,12 +46,20 @@ class AccountProducer {
     const mailbox = createMailbox({ ...this.mailboxCfg }, this.log);
     let email = mailbox.address || '(chua co email)';
     try {
+      // Chromium co the crash (OOM / /dev/shm nho) trong luc server chay lien tuc.
+      // Kiem tra va launch lai truoc moi lan tao tai khoan de khong fail hang loat.
+      if (this.registrar && typeof this.registrar.ensureAlive === 'function') {
+        await this.registrar.ensureAlive(this.log);
+      }
       const created = await mailbox.create();
       email = created.address || email;
       const password = genPassword(this.passwordLength);
       const account = await this.registrar.registerOne({ email, password, mailbox });
       await this.db.save(account);
       this.created++;
+      this.lastSuccessAt = new Date().toISOString();
+      this.lastError = null;
+      this.lastErrorAt = null;
       this.log(`[producer] #${index + 1} xong ${email} | tong thanh cong: ${this.created}`);
       if (this.onAccount) {
         try {
@@ -56,17 +71,39 @@ class AccountProducer {
       return account;
     } catch (err) {
       this.failed++;
+      this.lastError = err.message;
+      this.lastErrorAt = new Date().toISOString();
       this.log(`[producer] #${index + 1} that bai (${email}): ${err.message}`);
       return null;
     }
   }
 
-  /** Chay vo han cho den khi goi stop(). */
+  /** So account hien co trong pool (khong tinh account dang duoc tao). */
+  async poolSize() {
+    if (!this.db || typeof this.db.count !== 'function') return 0;
+    try {
+      return Number(await this.db.count()) || 0;
+    } catch (err) {
+      this.log(`[producer] khong doc duoc so luong pool: ${err.message}`);
+      return 0;
+    }
+  }
+
+  /** Chay vo han cho den khi goi stop(). Pool chi duoc co toi da maxAccounts. */
   async runForever() {
     this.running = true;
     let index = 0;
-    this.log(`[producer] bat dau (provider=${this.mailboxCfg.provider}, delay=${this.delayMs}ms, jitter=${this.jitterMs}ms)`);
+    this.log(`[producer] bat dau (provider=${this.mailboxCfg.provider}, delay=${this.delayMs}ms, jitter=${this.jitterMs}ms, gioi han pool=${this.maxAccounts})`);
     while (this.running) {
+      const total = await this.poolSize();
+      if (total >= this.maxAccounts) {
+        this.skipped++;
+        this.lastSkipAt = new Date().toISOString();
+        this.log(`[producer] pool day ${total}/${this.maxAccounts} - tam dung, doi API lay mat account roi tao tiep`);
+        // Khong tao khi da day; kiem tra lai nhanh de phan ung ngay khi pool giam.
+        await sleep(Math.min(5000, Math.max(1000, this.delayMs)));
+        continue;
+      }
       await this.step(index++);
       if (!this.running) break;
       const wait = this.delayMs + Math.floor(Math.random() * this.jitterMs);

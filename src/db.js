@@ -4,7 +4,8 @@
  * Pool tai khoan VSPhone tren PostgreSQL.
  *
  * - Producer luu tai khoan vao day sau khi tao xong (created_at = luc luu).
- * - API lay 1 tai khoan co tuoi [minAgeSeconds, maxAgeSeconds] va XOA NO LUON.
+ * - API lay tai khoan CU NHEST co tuoi >= minAgeSeconds va con han >= minRemainingSeconds,
+ *   roi XOA NO LUON. Account con han < minRemainingSeconds khong bi lay.
  * - Tai khoan qua han (> maxAgeSeconds) bi xoá dinh ky / moi lan goi API.
  *
  * THoi GIAN: moi quy dinh tuoi/xoa deu dung NOW() CUA POSTGRES trong SQL,
@@ -128,14 +129,18 @@ class AccountDB {
   }
 
   /**
-   * Lay 1 tai khoan da tao >= minAgeSeconds va chua qua maxAgeSeconds,
+   * Lay tai khoan CU NHEST (ORDER BY created_at ASC) thoa:
+   *   - tuoi >= minAgeSeconds            (mac dinh 5 phut)
+   *   - con han >= minRemainingSeconds   (mac dinh 5 phut -> tuoi <= maxAge - 300)
    * ROI XOA NGAY KHOI DB (ngan 2 API call lay cung 1 account).
+   * Account con han < 5 phut KHONG bi lay, cu de den maxAge roi bi cleanup xoa.
    * Moc thoi gian hoan toan lay tu NOW() cua DB, khong dung local time.
-   * Tra ve null neu pool chua co account nao đu dieu kien.
    */
-  async takeOne({ minAgeSeconds = 5, maxAgeSeconds = 1800 } = {}) {
+  async takeOne({ minAgeSeconds = 300, maxAgeSeconds = 1800, minRemainingSeconds = 300 } = {}) {
     if (!this.pool) return null;
     await this.cleanupStale(maxAgeSeconds);
+    // Tuoi toi da duoc lay = maxAge - minRemaining (VD 1800 - 300 = 1500s).
+    const takeMaxAge = Math.max(minAgeSeconds, maxAgeSeconds - minRemainingSeconds);
     const q = `
       WITH picked AS (
         SELECT id, email, password, token, user_id, created_at
@@ -151,7 +156,7 @@ class AccountDB {
       WHERE t.id = p.id
       RETURNING p.email AS email, p.password AS password, p.token AS token,
                 p.user_id AS user_id, p.created_at AS created_at`;
-    const { rows } = await this.pool.query(q, [minAgeSeconds, maxAgeSeconds]);
+    const { rows } = await this.pool.query(q, [minAgeSeconds, takeMaxAge]);
     if (!rows.length) return null;
     const row = rows[0];
     this.log(`[db] da lay va xoa ${row.email} khoi pool (createdAt=${row.created_at})`);
@@ -164,9 +169,17 @@ class AccountDB {
     };
   }
 
-  /** Thong ke pool: tong so, so san sang, so qua lu, so con qua moi (NOW() cua DB). */
-  async stats({ minAgeSeconds = 5, maxAgeSeconds = 1800 } = {}) {
-    if (!this.pool) return { total: 0, ready: 0, fresh: 0, stale: 0 };
+  /**
+   * Thong ke pool (NOW() cua DB):
+   *   total   - tong account (gioi han boi maxAccounts o producer)
+   *   ready   - du 5p tuoi, con han >= 5p => API se lay cu nhat trong nhom nay
+   *   fresh   - chua du 5p tuoi => chua duoc lay
+   *   expiring- con han < 5p => KHONG lay, doi den maxAge roi bi xoa
+   *   stale   - qua maxAge (se bi cleanup xoa)
+   */
+  async stats({ minAgeSeconds = 300, maxAgeSeconds = 1800, minRemainingSeconds = 300 } = {}) {
+    if (!this.pool) return { total: 0, ready: 0, fresh: 0, expiring: 0, stale: 0 };
+    const takeMaxAge = Math.max(minAgeSeconds, maxAgeSeconds - minRemainingSeconds);
     const { rows } = await this.pool.query(
       `SELECT
          COUNT(*)::int AS total,
@@ -179,15 +192,20 @@ class AccountDB {
          )::int AS fresh,
          COUNT(*) FILTER (
            WHERE created_at < NOW() - (($2::int) || ' seconds')::interval
+             AND created_at >= NOW() - (($3::int) || ' seconds')::interval
+         )::int AS expiring,
+         COUNT(*) FILTER (
+           WHERE created_at < NOW() - (($3::int) || ' seconds')::interval
          )::int AS stale
        FROM ${this.qTable}`,
-      [minAgeSeconds, maxAgeSeconds],
+      [minAgeSeconds, takeMaxAge, maxAgeSeconds],
     );
     const r = rows[0] || {};
     return {
       total: r.total || 0,
       ready: r.ready || 0,
       fresh: r.fresh || 0,
+      expiring: r.expiring || 0,
       stale: r.stale || 0,
     };
   }

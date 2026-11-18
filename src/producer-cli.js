@@ -24,6 +24,7 @@ function loadConfig() {
 async function main() {
   const cfg = loadConfig();
   const producerCfg = cfg.server?.producer || {};
+  const poolCfg = cfg.server?.pool || {};
   const dbCfg = {
     ...(cfg.database || {}),
     connectionString:
@@ -54,6 +55,7 @@ async function main() {
     delayMs: Number(args.delay ?? producerCfg.delayMs ?? cfg.delayMs ?? 15000),
     jitterMs: Number(args.jitter ?? producerCfg.jitterMs ?? cfg.delayJitterMs ?? 0),
     passwordLength: cfg.passwordLength || 12,
+    maxAccounts: Number(args['max-accounts'] ?? poolCfg.maxAccounts ?? 50),
     log: console.log,
   });
 
