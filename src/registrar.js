@@ -39,13 +39,14 @@ class VSPhoneRegistrar {
     this.browser = null;
     this.context = null;
     this.page = null;
+    this.relaunchCount = 0;
   }
 
   async launch() {
     this.browser = await chromium.launch({
       headless: !!this.cfg.headless,
       slowMo: this.cfg.slowMo || 0,
-      args: ['--disable-blink-features=AutomationControlled'],
+      args: ['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage'],
     });
     this.context = await this.browser.newContext({
       viewport: { width: 1280, height: 900 },
@@ -59,6 +60,43 @@ class VSPhoneRegistrar {
     this.imageBuffers = { back: null, shadow: null, backAt: 0, shadowAt: 0 };
     attachImageCollector(this.page, this.imageBuffers, !!this.cfg.debug, this.log);
     return this.page;
+  }
+
+  /** Browser/page con song khong? That bai thi producer se goi ensureAlive(). */
+  isHealthy() {
+    const connected = this.browser && typeof this.browser.isConnected === 'function'
+      ? this.browser.isConnected()
+      : !!this.browser;
+    return !!(connected && this.page && !this.page.isClosed());
+  }
+
+  /**
+   * Tu khoi dong lai Chromium khi browser/page da bi dong (VD: crash do OOM).
+   * Tra ve true neu phai launch lai. Co lock de 2 luong (producer/warmup)
+   * khong cung launch mot luc.
+   */
+  async ensureAlive(log = this.log) {
+    if (this.isHealthy()) return false;
+    if (this._launchPromise) return this._launchPromise;
+    this._launchPromise = (async () => {
+      const old = this.browser;
+      this.browser = null;
+      this.context = null;
+      this.page = null;
+      if (old) {
+        try { await old.close(); } catch (_) { /* da crash thi khong close duoc */ }
+      }
+      log('[browser] Chromium khong con song - dang khoi dong lai...');
+      await this.launch();
+      this.relaunchCount = (this.relaunchCount || 0) + 1;
+      log('[browser] Da khoi dong lai Chromium');
+      return true;
+    })();
+    try {
+      return await this._launchPromise;
+    } finally {
+      this._launchPromise = null;
+    }
   }
 
   async close() {
@@ -100,12 +138,8 @@ class VSPhoneRegistrar {
    * chan tai image/font/media, khong can captcha solver.
    */
   async newLightSession(log = console.log) {
-    if (!this.browser) {
-      this.browser = await chromium.launch({
-        headless: true,
-        args: ['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage'],
-      });
-    }
+    // browser co the bi crash giua chung - khong chi khi chua ton tai.
+    await this.ensureAlive(log);
     const context = await this.browser.newContext({
       viewport: { width: 640, height: 480 },
       locale: 'en-US',

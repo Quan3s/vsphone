@@ -11,11 +11,13 @@
  *      Header: x-api-key: <key>   hoac   ?apikey=<key>
  *      ?format=raw  -> tra thang chuoi "email|password"
  *
- *    Lay 1 tai khoan DA TAO >= 5s va chua qua 30p, tra ve dang `email|password`,
- *    XOA NGAY account do khoi DB. Account tao > 30p tu dong bi xoa.
+ *    Lay tai khoan CU NHEST co tuoi >= 5p va con han >= 5p (tuoi <= 25p),
+ *    tra ve dang `email|password`, XOA NGAY account do khoi DB.
+ *    Account con han < 5p (25p-30p) KHONG lay, de den 30p bi cleanup xoa.
+ *    Pool gioi han toi da 50 account; producer chi tao tiep khi so luong < 50.
  *    Moc thoi gian lay tu NOW() cua PostgreSQL (khong dung dong ho local).
  *
- *    GET /health -> trang thai producer + so luong pool.
+ *    GET /health -> trang thai producer + so luong pool + cau hinh gioi han.
  *
  * 3) Flag --multi-login (mac dinh tat):
  *    moi account vua duoc API lay se dua vao hang doi; cac browser headless
@@ -84,10 +86,16 @@ async function main() {
     console.log(`[server] apiKey: ${apiKeys.size} key (${envKeys.length ? 'tu env' : 'tu config'})`);
   }
 
-  // ---- pool: tuoi toi thieu / toi da (GIAY) ----
-  // Mac dinh: san sang sau 5s, tu dong xoa sau 30p (1800s).
-  const minAge = Math.max(0, Number(args['pool-min'] ?? serverCfg.pool?.minAgeSeconds ?? 5));
+  // ---- pool: tuoi toi thieu / toi da / han con lai (GIAY) ----
+  // Mac dinh: phai du 5p tuoi MOI duoc lay, con han phai >= 5p, qua 30p bi xoa.
+  // Account con han < 5p (tuoi 25p-30p) KHONG bi lay, de den 30p roi bi cleanup.
+  const minAge = Math.max(0, Number(args['pool-min'] ?? serverCfg.pool?.minAgeSeconds ?? 300));
   const maxAge = Math.max(minAge, Number(args['pool-max'] ?? serverCfg.pool?.maxAgeSeconds ?? 1800));
+  const minRemaining = Math.max(0, Number(args['pool-min-remaining'] ?? serverCfg.pool?.minRemainingSeconds ?? 300));
+  const takeMaxAge = Math.max(minAge, maxAge - minRemaining);
+  // Gioi han cứng so account trong pool (producer dung khi da dat gioi han).
+  const maxAccounts = Math.max(1, Number(args['pool-max-accounts'] ?? serverCfg.pool?.maxAccounts ?? 50));
+  const poolPolicy = { minAgeSeconds: minAge, maxAgeSeconds: maxAge, minRemainingSeconds: minRemaining };
 
   // ---- producer (1 luong) ----
   const producerEnabled =
@@ -136,6 +144,7 @@ async function main() {
     delayMs: producerDelay,
     jitterMs: producerJitter,
     passwordLength: cfg.passwordLength || 12,
+    maxAccounts,
     log: console.log,
   });
   // ---- hang doi warmup: login -> logout -> login lai trong vong 3p ----
@@ -193,10 +202,28 @@ async function main() {
         return send(res, 200, {
           ok: true,
           producer: producerEnabled
-            ? { running: producer.running, created: producer.created, failed: producer.failed }
+            ? {
+                running: producer.running,
+                created: producer.created,
+                failed: producer.failed,
+                maxAccounts: producer.maxAccounts,
+                skipped: producer.skipped,
+                lastSkipAt: producer.lastSkipAt || null,
+                lastSuccessAt: producer.lastSuccessAt || null,
+                lastError: producer.lastError || null,
+                lastErrorAt: producer.lastErrorAt || null,
+              }
             : 'off',
           warmup: { enabled: multiLogin, queued: warmupQueue.length },
-          pool: await db.stats({ minAgeSeconds: minAge, maxAgeSeconds: maxAge }),
+          browser: {
+            healthy: typeof registrar.isHealthy === 'function' ? registrar.isHealthy() : null,
+            relaunches: registrar.relaunchCount || 0,
+          },
+          pool: {
+            ...(await db.stats(poolPolicy)),
+            maxAccounts,
+            takeMaxAgeSeconds: takeMaxAge,
+          },
         });
       }
 
@@ -209,12 +236,12 @@ async function main() {
         return send(res, 401, { ok: false, error: 'invalid api key' });
       }
 
-      const account = await db.takeOne({ minAgeSeconds: minAge, maxAgeSeconds: maxAge });
+      const account = await db.takeOne(poolPolicy);
       if (!account) {
         return send(res, 503, {
           ok: false,
-          error: `chua co tai khoan tuoi ${minAge}s-${maxAge}s trong pool`,
-          pool: await db.stats({ minAgeSeconds: minAge, maxAgeSeconds: maxAge }),
+          error: `chua co account san sang (can tuoi >=${minAge}s va con han >=${minRemaining}s; se lay cu nhat)`,
+          pool: { ...(await db.stats(poolPolicy)), maxAccounts, takeMaxAgeSeconds: takeMaxAge },
         });
       }
 
@@ -241,8 +268,8 @@ async function main() {
   server.listen(port, () => {
     console.log(`[server] lang nghe port ${port}`);
     console.log(`[server] GET/POST /register | ?apikey=<key> | x-api-key header | ?format=raw`);
-    console.log(`[server] pool: lay account tuoi ${minAge}s-${maxAge}s, xoa >${maxAge}s, xoa ngay sau khi lay (moc thoi gian tu DB NOW())`);
-    console.log(`[server] producer: ${producerEnabled ? `bat (inboxkitten, nghi ${producerDelay}ms)` : 'tat (--no-producer)'}`);
+    console.log(`[server] pool: toi da ${maxAccounts} account; lay CU NHEST co tuoi >=${minAge}s va con han >=${minRemaining}s (tuoi <=${takeMaxAge}s); xoa >${maxAge}s`);
+    console.log(`[server] producer: ${producerEnabled ? `bat (inboxkitten, nghi ${producerDelay}ms, dung khi pool day ${maxAccounts})` : 'tat (--no-producer)'}`);
     console.log(`[server] multi-login: ${multiLogin ? `bat (${loginWorkers} worker, han ${loginWindowMs}ms)` : 'tat (them --multi-login de bat)'}`);
   });
 

@@ -7,12 +7,15 @@ Tool tự động đăng ký tài khoản trên **cloud.vsphone.com** (VSPhone �
 Khác với chế độ cũ (mỗi request API tự đăng ký một account), chế độ Pool tách làm 2 phần:
 
 1. **Producer đơn luồng** (chạy ngay khi khởi động `server.js`, hoặc chạy riêng bằng `npm run start:producer`):
-   dùng **inboxkitten**, tạo account → lưu PostgreSQL → nghỉ **15s** → tạo tiếp, lặp vô hạn.
+   dùng **inboxkitten**, tạo account → lưu PostgreSQL → nghỉ **15s** → tạo tiếp.
+   Pool **tối đa 50 account**: khi `count >= 50` producer **tạm dừng**, chỉ tạo tiếp khi API lấy bớt (`count < 50`).
 2. **API** chỉ lấy account có trong pool:
-   - chỉ lấy account **đã tạo xong ≥ 10 phút** và **chưa quá 60 phút**;
+   - lấy account **cũ nhất** (`ORDER BY created_at ASC`), **không lấy account mới**;
+   - account phải **đã tạo ≥ 5 phút** VÀ **còn hạn ≥ 5 phút** (tuổi ≤ 25 phút nếu `maxAge = 30p`);
+   - account **còn hạn < 5 phút** (tuổi 25–30p) **không được lấy** — cứ để đến 30p rồi bị cleanup xoá;
    - trả về chuỗi `email|password`;
    - **xoá ngay account đó khỏi DB** (tránh 2 request lấy trùng);
-   - account **> 60 phút** tự động bị xoá (mỗi lần gọi API + mỗi phút).
+   - account **> 30 phút** tự động bị xoá (mỗi lần gọi API + mỗi phút).
 
 ```bash
 # cần PostgreSQL: đặt DATABASE_URL hoặc config.database.connectionString
@@ -52,8 +55,10 @@ node src/server.js --multi-login --login-workers 4 --login-window 180000
 | `--producer-delay ms` | `15000` | nghỉ giữa 2 lần tạo account |
 | `--producer-jitter ms` | `0` | ngẫu nhiên cộng thêm vào delay |
 | `--provider P` | `inboxkitten` | provider lấy mail (mặc định inboxkitten) |
-| `--pool-min N` | `5` | tuổi tối thiểu (giây) để API lấy account |
+| `--pool-min N` | `300` | tuổi tối thiểu (giây = 5 phút) để API lấy account |
 | `--pool-max N` | `1800` | tuổi tối đa (giây = 30 phút); account cũ hơn bị xoá |
+| `--pool-min-remaining N` | `300` | hạn còn lại tối thiểu (giây = 5 phút); account sắp hết hạn không bị lấy |
+| `--pool-max-accounts N` | `50` | giới hạn cứng số account trong pool; producer dừng khi đạt |
 | `--multi-login` | off | bật luồng browser headless login/logout/login |
 | `--login-workers N` | `2` | số browser worker |
 | `--login-window ms` | `180000` | hạn xử lý (3 phút), quá hạn thì bỏ qua |

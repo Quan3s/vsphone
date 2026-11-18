@@ -43,8 +43,10 @@
       "changeme-key-1"
     ],
     "pool": {
-      "minAgeSeconds": 5,
-      "maxAgeSeconds": 1800
+      "minAgeSeconds": 300,
+      "maxAgeSeconds": 1800,
+      "minRemainingSeconds": 300,
+      "maxAccounts": 50
     },
     "producer": {
       "enabled": true,
