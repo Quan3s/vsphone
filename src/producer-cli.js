@@ -45,6 +45,22 @@ async function main() {
   );
   await registrar.launch();
 
+  const restartEveryMs = Math.max(0, Number(
+    args['restart-every-ms'] ??
+    (args['restart-every-minutes'] != null ? Number(args['restart-every-minutes']) * 60000 : null) ??
+    producerCfg.restartEveryMs ??
+    (producerCfg.restartEveryMinutes != null ? Number(producerCfg.restartEveryMinutes) * 60000 : null) ??
+    process.env.BROWSER_RESTART_EVERY_MS ??
+    (process.env.BROWSER_RESTART_EVERY_MINUTES != null ? Number(process.env.BROWSER_RESTART_EVERY_MINUTES) * 60000 : null) ??
+    7200000
+  ) || 0);
+  const restartAfterFailures = Math.max(0, Number(
+    args['restart-after-failures'] ??
+    producerCfg.restartAfterFailures ??
+    process.env.BROWSER_RESTART_AFTER_FAILURES ??
+    5
+  ) || 0);
+
   const producer = new AccountProducer({
     registrar,
     db,
@@ -56,6 +72,8 @@ async function main() {
     jitterMs: Number(args.jitter ?? producerCfg.jitterMs ?? cfg.delayJitterMs ?? 0),
     passwordLength: cfg.passwordLength || 12,
     maxAccounts: Number(args['max-accounts'] ?? poolCfg.maxAccounts ?? 50),
+    restartEveryMs,
+    restartAfterFailures,
     log: console.log,
   });
 

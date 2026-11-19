@@ -107,6 +107,21 @@ async function main() {
   const producerDelay = Number(args['producer-delay'] ?? serverCfg.producer?.delayMs ?? cfg.delayMs ?? 15000);
   const producerJitter = Number(args['producer-jitter'] ?? serverCfg.producer?.jitterMs ?? 0);
   const mailboxProvider = args.provider || serverCfg.producer?.mailbox?.provider || 'inboxkitten';
+  const restartEveryMs = Math.max(0, Number(
+    args['restart-every-ms'] ??
+    (args['restart-every-minutes'] != null ? Number(args['restart-every-minutes']) * 60000 : null) ??
+    serverCfg.producer?.restartEveryMs ??
+    (serverCfg.producer?.restartEveryMinutes != null ? Number(serverCfg.producer.restartEveryMinutes) * 60000 : null) ??
+    process.env.BROWSER_RESTART_EVERY_MS ??
+    (process.env.BROWSER_RESTART_EVERY_MINUTES != null ? Number(process.env.BROWSER_RESTART_EVERY_MINUTES) * 60000 : null) ??
+    7200000
+  ) || 0);
+  const restartAfterFailures = Math.max(0, Number(
+    args['restart-after-failures'] ??
+    serverCfg.producer?.restartAfterFailures ??
+    process.env.BROWSER_RESTART_AFTER_FAILURES ??
+    5
+  ) || 0);
 
   // ---- multi-login warmup (flag, mac dinh tat) ----
   const multiLogin = args['multi-login'] !== undefined
@@ -145,6 +160,8 @@ async function main() {
     jitterMs: producerJitter,
     passwordLength: cfg.passwordLength || 12,
     maxAccounts,
+    restartEveryMs,
+    restartAfterFailures,
     log: console.log,
   });
   // ---- hang doi warmup: login -> logout -> login lai trong vong 3p ----
@@ -206,12 +223,17 @@ async function main() {
                 running: producer.running,
                 created: producer.created,
                 failed: producer.failed,
+                consecutiveFailures: producer.consecutiveFailures || 0,
                 maxAccounts: producer.maxAccounts,
                 skipped: producer.skipped,
                 lastSkipAt: producer.lastSkipAt || null,
                 lastSuccessAt: producer.lastSuccessAt || null,
                 lastError: producer.lastError || null,
                 lastErrorAt: producer.lastErrorAt || null,
+                browserRestarts: producer.browserRestarts || 0,
+                lastBrowserRestartAt: producer.lastBrowserRestartAt ? new Date(producer.lastBrowserRestartAt).toISOString() : null,
+                restartEveryMs: producer.restartEveryMs || 0,
+                restartAfterFailures: producer.restartAfterFailures || 0,
               }
             : 'off',
           warmup: { enabled: multiLogin, queued: warmupQueue.length },
@@ -219,6 +241,7 @@ async function main() {
             healthy: typeof registrar.isHealthy === 'function' ? registrar.isHealthy() : null,
             relaunches: registrar.relaunchCount || 0,
             recycles: registrar.recycleCount || 0,
+            lastRelaunchAt: registrar.lastRelaunchAt || null,
             rssMb: Math.round(process.memoryUsage().rss / 1048576),
           },
           pool: {
@@ -271,7 +294,10 @@ async function main() {
     console.log(`[server] lang nghe port ${port}`);
     console.log(`[server] GET/POST /register | ?apikey=<key> | x-api-key header | ?format=raw`);
     console.log(`[server] pool: toi da ${maxAccounts} account; lay CU NHEST co tuoi >=${minAge}s va con han >=${minRemaining}s (tuoi <=${takeMaxAge}s); xoa >${maxAge}s`);
-    console.log(`[server] producer: ${producerEnabled ? `bat (inboxkitten, nghi ${producerDelay}ms, dung khi pool day ${maxAccounts})` : 'tat (--no-producer)'}`);
+    const restartDesc = restartEveryMs > 0 || restartAfterFailures > 0
+      ? `restart browser moi ${Math.round(restartEveryMs / 60000)}p/sau ${restartAfterFailures} loi lien tiep`
+      : 'restart browser tat';
+    console.log(`[server] producer: ${producerEnabled ? `bat (inboxkitten, nghi ${producerDelay}ms, dung khi pool day ${maxAccounts}, ${restartDesc})` : 'tat (--no-producer)'}`);
     console.log(`[server] multi-login: ${multiLogin ? `bat (${loginWorkers} worker, han ${loginWindowMs}ms)` : 'tat (them --multi-login de bat)'}`);
   });
 

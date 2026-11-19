@@ -17,6 +17,8 @@ class AccountProducer {
     jitterMs = 0,
     passwordLength = 12,
     maxAccounts = 50,
+    restartEveryMs = 0,
+    restartAfterFailures = 0,
     log = console.log,
   } = {}) {
     this.registrar = registrar;
@@ -29,15 +31,20 @@ class AccountProducer {
     this.jitterMs = Math.max(0, Number(jitterMs) || 0);
     this.passwordLength = passwordLength;
     this.maxAccounts = Math.max(1, Number(maxAccounts) || 50);
+    this.restartEveryMs = Math.max(0, Number(restartEveryMs) || 0);
+    this.restartAfterFailures = Math.max(0, Number(restartAfterFailures) || 0);
     this.log = log;
     this.running = false;
     this.created = 0;
     this.failed = 0;
     this.skipped = 0;
+    this.consecutiveFailures = 0;
     this.lastSkipAt = null;
     this.lastSuccessAt = null;
     this.lastError = null;
     this.lastErrorAt = null;
+    this.lastBrowserRestartAt = null;
+    this.browserRestarts = 0;
     this.onAccount = null;
   }
 
@@ -57,6 +64,7 @@ class AccountProducer {
       const account = await this.registrar.registerOne({ email, password, mailbox });
       await this.db.save(account);
       this.created++;
+      this.consecutiveFailures = 0;
       this.lastSuccessAt = new Date().toISOString();
       this.lastError = null;
       this.lastErrorAt = null;
@@ -71,9 +79,10 @@ class AccountProducer {
       return account;
     } catch (err) {
       this.failed++;
+      this.consecutiveFailures++;
       this.lastError = err.message;
       this.lastErrorAt = new Date().toISOString();
-      this.log(`[producer] #${index + 1} that bai (${email}): ${err.message}`);
+      this.log(`[producer] #${index + 1} that bai (${email}): ${err.message} (lien tiep: ${this.consecutiveFailures})`);
       return null;
     } finally {
       // OOM defense: dong context/page cu, mo context moi sau MOI account.
@@ -99,11 +108,41 @@ class AccountProducer {
     }
   }
 
+  /**
+   * Khoi dong lai browser dinh ky hoac sau chuoi loi lien tiep (VD captcha fail lien tuc).
+   * Chi thuc hien khi registrar ho tro relaunch va dang o diem an toan giua cac step.
+   */
+  async maybeRestartBrowser() {
+    if (!this.registrar || typeof this.registrar.relaunch !== 'function') return false;
+    let reason = null;
+    if (this.restartEveryMs > 0 && this.lastBrowserRestartAt) {
+      const age = Date.now() - this.lastBrowserRestartAt;
+      if (age >= this.restartEveryMs) {
+        reason = `dinh ky ${Math.round(age / 60000)}p >= ${Math.round(this.restartEveryMs / 60000)}p`;
+      }
+    }
+    if (!reason && this.restartAfterFailures > 0 && this.consecutiveFailures >= this.restartAfterFailures) {
+      reason = `${this.consecutiveFailures} loi lien tiep`;
+      // Cho 1 lan thu lai sau restart thay vi restart lien tuc.
+      this.consecutiveFailures = 0;
+    }
+    if (!reason) return false;
+    this.log(`[producer] restart browser: ${reason}`);
+    await this.registrar.relaunch(this.log, reason);
+    this.lastBrowserRestartAt = Date.now();
+    this.browserRestarts++;
+    return true;
+  }
+
   /** Chay vo han cho den khi goi stop(). Pool chi duoc co toi da maxAccounts. */
   async runForever() {
     this.running = true;
+    this.lastBrowserRestartAt = Date.now();
     let index = 0;
-    this.log(`[producer] bat dau (provider=${this.mailboxCfg.provider}, delay=${this.delayMs}ms, jitter=${this.jitterMs}ms, gioi han pool=${this.maxAccounts})`);
+    const restartInfo = [];
+    if (this.restartEveryMs > 0) restartInfo.push(`moi ${Math.round(this.restartEveryMs / 60000)}p`);
+    if (this.restartAfterFailures > 0) restartInfo.push(`sau ${this.restartAfterFailures} loi lien tiep`);
+    this.log(`[producer] bat dau (provider=${this.mailboxCfg.provider}, delay=${this.delayMs}ms, jitter=${this.jitterMs}ms, gioi han pool=${this.maxAccounts}, restart browser: ${restartInfo.join(', ') || 'tat'})`);
     while (this.running) {
       const total = await this.poolSize();
       if (total >= this.maxAccounts) {
@@ -113,6 +152,11 @@ class AccountProducer {
         // Khong tao khi da day; kiem tra lai nhanh de phan ung ngay khi pool giam.
         await sleep(Math.min(5000, Math.max(1000, this.delayMs)));
         continue;
+      }
+      try {
+        await this.maybeRestartBrowser();
+      } catch (err) {
+        this.log(`[producer] khong restart duoc browser: ${err.message}`);
       }
       await this.step(index++);
       if (!this.running) break;

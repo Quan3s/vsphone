@@ -54,6 +54,9 @@ node src/server.js --multi-login --login-workers 4 --login-window 180000
 | `--no-producer` | – | tắt producer trong server (dùng khi chạy producer riêng) |
 | `--producer-delay ms` | `15000` | nghỉ giữa 2 lần tạo account |
 | `--producer-jitter ms` | `0` | ngẫu nhiên cộng thêm vào delay |
+| `--restart-every-minutes N` | `120` | khởi động lại browser định kỳ mỗi N phút (0 = tắt) để tránh captcha fail liên tục khi chạy lâu |
+| `--restart-every-ms N` | `7200000` | như trên nhưng tính bằng mili-giây |
+| `--restart-after-failures N` | `5` | khởi động lại browser sau N lần tạo tài khoản thất bại liên tiếp (0 = tắt) |
 | `--provider P` | `inboxkitten` | provider lấy mail (mặc định inboxkitten) |
 | `--pool-min N` | `300` | tuổi tối thiểu (giây = 5 phút) để API lấy account |
 | `--pool-max N` | `1800` | tuổi tối đa (giây = 30 phút); account cũ hơn bị xoá |
