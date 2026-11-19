@@ -41,6 +41,7 @@ class VSPhoneRegistrar {
     this.page = null;
     this.relaunchCount = 0;
     this.recycleCount = 0;
+    this.lastRelaunchAt = null;
   }
 
   /** Tao context/page chinh (dung lai khi can "lam sach" memory sau moi account). */
@@ -100,6 +101,34 @@ class VSPhoneRegistrar {
   }
 
   /**
+   * Dong browser hien tai va mo lai Chromium moi (ke ca khi van healthy).
+   * Dung cho restart dinh ky / phuc hoi sau chuoi loi captcha lien tuc.
+   */
+  async relaunch(log = this.log, reason = 'manual') {
+    if (this._launchPromise) return this._launchPromise;
+    this._launchPromise = (async () => {
+      const old = this.browser;
+      this.browser = null;
+      this.context = null;
+      this.page = null;
+      if (old) {
+        try { await old.close(); } catch (_) { /* ignore */ }
+      }
+      log(`[browser] Dang khoi dong lai Chromium (${reason})...`);
+      await this.launch();
+      this.relaunchCount = (this.relaunchCount || 0) + 1;
+      this.lastRelaunchAt = new Date().toISOString();
+      log('[browser] Da khoi dong lai Chromium');
+      return true;
+    })();
+    try {
+      return await this._launchPromise;
+    } finally {
+      this._launchPromise = null;
+    }
+  }
+
+  /**
    * Tu khoi dong lai Chromium khi browser/page da bi dong (VD: crash do OOM).
    * Tra ve true neu phai launch lai. Co lock de 2 luong (producer/warmup)
    * khong cung launch mot luc.
@@ -118,6 +147,7 @@ class VSPhoneRegistrar {
       log('[browser] Chromium khong con song - dang khoi dong lai...');
       await this.launch();
       this.relaunchCount = (this.relaunchCount || 0) + 1;
+      this.lastRelaunchAt = new Date().toISOString();
       log('[browser] Da khoi dong lai Chromium');
       return true;
     })();

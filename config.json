@@ -52,6 +52,8 @@
       "enabled": true,
       "delayMs": 15000,
       "jitterMs": 0,
+      "restartEveryMinutes": 120,
+      "restartAfterFailures": 5,
       "mailbox": {
         "provider": "inboxkitten"
       }
